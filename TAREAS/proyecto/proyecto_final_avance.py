@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 # ------------------------------------------------------------------------------
 # 1. VARIABLES GLOBALES (Requisito: al menos 4 variables globales)
 # ------------------------------------------------------------------------------
-RUTA_ARCHIVO_DEFAULT = "marketing_campaign_dataset.csv"  # Ruta predeterminada del dataset
+RUTA_ARCHIVO_DEFAULT = "TAREAS/proyecto/marketing_campaign_dataset.csv"  # Ruta predeterminada del dataset
 DATAFRAME_CAMPANAS = None                                 # Variable global para almacenar el DataFrame limpio
 CANALES_VALIDOS = ["Search", "Social", "Email", "Display", "Influencer"] # Filtro de canales permitidos
 SISTEMA_ACTIVO = True                                     # Flag global de control para el bucle del menú
@@ -20,46 +20,71 @@ SISTEMA_ACTIVO = True                                     # Flag global de contr
 # ------------------------------------------------------------------------------
 def cargar_y_limpiar_datos(ruta_archivo):
     """
-    Carga el CSV mediante Pandas, gestiona excepciones con try/except, realiza conversiones
-    de tipos de datos y ejecuta la limpieza (eliminación de nulos y duplicados).
+    Carga el archivo CSV con Pandas, maneja errores de ruta/formato mediante try/except,
+    elimina duplicados/nulos y realiza la conversión explícita de tipos de datos.
+    Retorna un DataFrame de Pandas depurado o None si ocurre un error.
     """
-    # Variables locales:
-    # 1. df_raw (DataFrame original)
-    df_raw = pd.DataFrame()  # Inicialización del DataFrame original
-    # 2. registros_iniciales (int)
-    registros_iniciales = 0  # Contador de registros iniciales
-    # 3. df_limpio (DataFrame procesado)
-    df_limpio = pd.DataFrame()  # Inicialización del DataFrame limpio
-    
-    # MANEJO DE EXCEPCIONES Y LECTURA CON PANDAS:
-    try:
-         df_raw = pd.read_csv(ruta_archivo)
+    # Variables locales para el control del proceso de carga
+    df_raw = None
+    df_limpio = None
+    registros_iniciales = 0
+    registros_finales = 0
 
-         registros_iniciales = len(df_raw)
-    #     
-    #     LIMPIEZA DE DATOS CON PANDAS:
-         df_limpio = df_raw.drop_duplicates()
-         df_limpio = df_limpio.dropna(subset=['Campaign_ID', 'Acquisition_Cost', 'ROI'])
-    #     
-    #     CONVERSIÓN DE TIPOS DE DATOS:
-    #     CONVERSIÓN 1: Convertir columna de fecha a datetime -> pd.to_datetime(df_limpio['Date'])
+    try:
+        print(f"\n[+] Intentando cargar el archivo de datos: '{ruta_archivo}'...")
         
-    #     CONVERSIÓN 2: Convertir métricas numéricas -> df_limpio['Clicks'] = df_limpio['Clicks'].astype(int)
-    #                   df_limpio['ROI'] = df_limpio['ROI'].astype(float)
-    #     
-    #     ESTRUCTURA NATIUA VACÍAS PARA CUMPLIMIENTO:
-    #     Convertir registros clave a una lista de diccionarios con df_limpio.to_dict('records')
-    #     
-    #     print(f"Datos cargados exitosamente. Registros limpios: {len(df_limpio)} de {registros_iniciales}")
-    #     return df_limpio
-    #
+        # Lectura con Pandas
+        df_raw = pd.read_csv(ruta_archivo)
+        registros_iniciales = len(df_raw)
+        print(f"[✓] Archivo leído correctamente. Registros iniciales: {registros_iniciales}")
+
+        # 1. Depuración: Eliminación de duplicados exactos
+        df_limpio = df_raw.drop_duplicates()
+
+        # 2. Depuración: Limpieza de filas con valores vacíos/nulos en campos clave
+        columnas_criticas = ['Campaign_ID', 'Channel', 'Acquisition_Cost', 'ROI']
+        columnas_presentes = [col for col in columnas_criticas if col in df_limpio.columns]
+        df_limpio = df_limpio.dropna(subset=columnas_presentes)
+
+        # 3. Conversiones de tipo de datos (Requisito: al menos 2 conversiones)
+        
+        # CONVERSIÓN 1: Mapeo de columnas de texto a formato fecha (datetime)
+        if 'Date' in df_limpio.columns:
+            df_limpio['Date'] = pd.to_datetime(df_limpio['Date'], errors='coerce')
+
+        # CONVERSIÓN 2: Conversión explícita de campos numéricos (str/float a int/float)
+        # Enteros (métrica de conteo)
+        for col_int in ['Clicks', 'Conversions', 'Impressions']:
+            if col_int in df_limpio.columns:
+                df_limpio[col_int] = pd.to_numeric(df_limpio[col_int], errors='coerce').fillna(0).astype(int)
+
+        # Flotantes (métrica monetaria y de porcentaje)
+        for col_float in ['Acquisition_Cost', 'ROI', 'Conversion_Rate', 'Spend']:
+            if col_float in df_limpio.columns:
+                df_limpio[col_float] = pd.to_numeric(df_limpio[col_float], errors='coerce').fillna(0.0).astype(float)
+
+        # Re-filtrar si alguna conversión generó NaNs inválidos
+        df_limpio = df_limpio.dropna(subset=columnas_presentes)
+        registros_finales = len(df_limpio)
+
+        filas_eliminadas = registros_iniciales - registros_finales
+        print(f"[✓] Limpieza completada. Filas omitidas (duplicadas/nulas/inválidas): {filas_eliminadas}")
+        print(f"[✓] Registros limpios listos para análisis: {registros_finales}")
+
+        return df_limpio
+
     except FileNotFoundError:
-         print("ERROR: No se encontró el archivo en la ruta especificada.")
-         return None
+        print(f"\n[!] ERROR CRÍTICO: No se encontró el archivo '{ruta_archivo}'.")
+        print("    Asegúrate de que el archivo CSV esté en la misma carpeta que este script.")
+        return None
+
+    except pd.errors.EmptyDataError:
+        print(f"\n[!] ERROR: El archivo '{ruta_archivo}' está completamente vacío.")
+        return None
+
     except Exception as e:
-         print(f"ERROR al procesar el archivo: {e}")
-         return None
-    pass
+        print(f"\n[!] ERROR INESPERADO al procesar los datos: {e}")
+        return None
 
 
 # ------------------------------------------------------------------------------
@@ -67,26 +92,53 @@ def cargar_y_limpiar_datos(ruta_archivo):
 # ------------------------------------------------------------------------------
 def calcular_metricas_generales(df):
     """
-    Calcula agregaciones generales (promedios, sumas, frecuencias) utilizando los métodos de Pandas
-    y extrae estadísticas en estructuras de diccionarios para su despliegue.
+    Calcula y despliega las métricas estadísticas globales del dataset,
+    tales como inversión total, ROI promedio, conversiones y estadísticas descriptivas.
     """
-    # Variables locales:
-    # 4. resumen_dict (dict extraído de Pandas)
-    # 5. roi_promedio (float)
-    
-    # CÁLCULOS ESTADÍSTICOS CON PANDAS:
-    # roi_promedio = df['ROI'].mean()
-    # costo_total = df['Acquisition_Cost'].sum()
-    # conversiones_totales = df['Conversions'].sum()
-    # cpa_promedio = costo_total / conversiones_totales if conversiones_totales > 0 else 0
-    #
-    # CONVERSIÓN A DICCIONARIO NATIWO:
-    # resumen_dict = df[['Acquisition_Cost', 'ROI', 'Clicks', 'Conversions']].describe().to_dict()
-    #
-    # BUCLE FOR (Para recorrer el diccionario e imprimir el resumen estadístico):
-    # for metrica, valores in resumen_dict.items():
-    #     print(f"Métrica: {metrica} -> Promedio: {valores['mean']:.2f}")
-    pass
+    if df is None or df.empty:
+        print("\n[!] No hay datos disponibles para realizar el cálculo.")
+        return
+
+    print("\n" + "=" * 55)
+    print("           RESUMEN ESTADÍSTICO GENERAL")
+    print("=" * 55)
+
+    # Variables locales para métricas agregadas
+    total_campanas = len(df)
+    inversion_total = df['Acquisition_Cost'].sum() if 'Acquisition_Cost' in df.columns else 0.0
+    roi_promedio = df['ROI'].mean() if 'ROI' in df.columns else 0.0
+    clics_totales = df['Clicks'].sum() if 'Clicks' in df.columns else 0
+    conversiones_totales = df['Conversions'].sum() if 'Conversions' in df.columns else 0
+
+    # Métrica derivada: Costo por Adquisición Promedio (CPA)
+    cpa_promedio = (inversion_total / conversiones_totales) if conversiones_totales > 0 else 0.0
+
+    # Despliegue de métricas principales
+    print(f"• Total de Campañas Analizadas:  {total_campanas:,}")
+    print(f"• Inversión / Costo Total:      ${inversion_total:,.2f}")
+    print(f"• Clics Totales Generados:      {clics_totales:,}")
+    print(f"• Conversiones Totales:          {conversiones_totales:,}")
+    print(f"• ROI Promedio General:         {roi_promedio:.2f}x")
+    print(f"• Costo por Adquisición (CPA):  ${cpa_promedio:,.2f}")
+
+    print("\n" + "-" * 55)
+    print("  DESGLOSE DESCRIPTIVO DE VARIABLES CLAVE (Pandas)")
+    print("-" * 55)
+
+    # Extracción de estadísticas descriptivas a diccionario
+    cols_analizar = [c for c in ['Acquisition_Cost', 'ROI', 'Clicks', 'Conversions'] if c in df.columns]
+    stats_dict = df[cols_analizar].describe().round(2).to_dict()
+
+    # Recorrido del diccionario extraído de Pandas
+    for columna, metricas in stats_dict.items():
+        print(f"\n Variable: [{columna}]")
+        print(f"   - Mínimo:          {metricas['min']}")
+        print(f"   - Máximo:          {metricas['max']}")
+        print(f"   - Promedio (Media): {metricas['mean']}")
+        print(f"   - Mediana (50%):    {metricas['50%']}")
+        print(f"   - Desv. Estándar:   {metricas['std']}")
+
+    print("=" * 55)
 
 
 def analizar_y_graficar_por_canal(df):
@@ -148,49 +200,69 @@ def agregar_nueva_campana(df):
 # ------------------------------------------------------------------------------
 def mostrar_menu_principal():
     """
-    Controla la navegación interactiva mediante un bucle while y estructuras condicionales (if/elif/else).
+    Controla la navegación interactiva mediante consola utilizando un bucle while
+    y condicionales para desplegar y procesar las opciones del usuario.
     """
     global DATAFRAME_CAMPANAS, SISTEMA_ACTIVO
     
-    # Carga inicial de datos
+    # Intentar cargar los datos al iniciar el programa
+    print("Iniciando el sistema y cargando datos...")
     DATAFRAME_CAMPANAS = cargar_y_limpiar_datos(RUTA_ARCHIVO_DEFAULT)
     
-    # BUCLE PRINCIPAL (while SISTEMA_ACTIVO):
-    # while SISTEMA_ACTIVO:
-    #     print("\n" + "="*40)
-    #     print("  SISTEMA DE ANÁLISIS DE CAMPAÑAS DIGITALES")
-    #     print("="*40)
-    #     print("1. Ver resumen estadístico general (Pandas)")
-    #     print("2. Ver gráfico de rendimiento por canal (Matplotlib)")
-    #     print("3. Filtrar campañas por umbral de ROI (Consulta)")
-    #     print("4. Registrar una nueva campaña (Modificar sistema)")
-    #     print("5. Salir")
-    #     
-    #     opcion = input("Seleccione una opción (1-5): ") # INTERACCIÓN USUARIO 3
-    #     
-    #     # ESTRUCTURA CONDICIONAL MULTIPROPÓSITO (if / elif / else):
-    #     if opcion == "1":
-    #         if DATAFRAME_CAMPANAS is not None:
-    #             calcular_metricas_generales(DATAFRAME_CAMPANAS)
-    #     elif opcion == "2":
-    #         if DATAFRAME_CAMPANAS is not None:
-    #             analizar_y_graficar_por_canal(DATAFRAME_CAMPANAS)
-    #     elif opcion == "3":
-    #         if DATAFRAME_CAMPANAS is not None:
-    #             umbral_ingresado = float(input("Ingrese el ROI mínimo a consultar: ")) # INTERACCIÓN USUARIO 4
-    #             filtrar_por_umbral_roi(DATAFRAME_CAMPANAS, umbral_ingresado)
-    #     elif opcion == "4":
-    #         if DATAFRAME_CAMPANAS is not None:
-    #             DATAFRAME_CAMPANAS = agregar_nueva_campana(DATAFRAME_CAMPANAS)
-    #     elif opcion == "5":
-    #         SISTEMA_ACTIVO = False
-    #         print("Cerrando el sistema de análisis. ¡Hasta pronto!")
-    #     else:
-    #         print("Opción inválida. Ingrese un número entre 1 y 5.")
+    # Bucle principal de interacción (while)
+    while SISTEMA_ACTIVO:
+        print("\n" + "=" * 50)
+        print("   SISTEMA DE ANÁLISIS DE CAMPAÑAS DIGITALES")
+        print("=" * 50)
+        print("1. Ver resumen estadístico general (Pandas)")
+        print("2. Analizar y graficar rendimiento por canal (Matplotlib)")
+        print("3. Filtrar campañas por umbral de ROI")
+        print("4. Registrar una nueva campaña al sistema")
+        print("5. Salir")
+        print("=" * 50)
+        
+        # Interacción con el usuario: Entrada de la opción deseada
+        opcion = input("Seleccione una opción (1-5): ").strip()
+        
+        # Estructura condicional (if / elif / else)
+        if opcion == "1":
+            if DATAFRAME_CAMPANAS is not None and not DATAFRAME_CAMPANAS.empty:
+                calcular_metricas_generales(DATAFRAME_CAMPANAS)
+            else:
+                print("\n[!] No hay datos cargados para realizar el análisis.")
+                
+        elif opcion == "2":
+            if DATAFRAME_CAMPANAS is not None and not DATAFRAME_CAMPANAS.empty:
+                analizar_y_graficar_por_canal(DATAFRAME_CAMPANAS)
+            else:
+                print("\n[!] No hay datos cargados para visualizar.")
+                
+        elif opcion == "3":
+            if DATAFRAME_CAMPANAS is not None and not DATAFRAME_CAMPANAS.empty:
+                try:
+                    umbral = float(input("\nIngrese el ROI mínimo a consultar (ej. 2.5): "))
+                    filtrar_por_umbral_roi(DATAFRAME_CAMPANAS, umbral)
+                except ValueError:
+                    print("\n[!] Error: Debe ingresar un valor numérico válido.")
+            else:
+                print("\n[!] No hay datos cargados para consultar.")
+                
+        elif opcion == "4":
+            if DATAFRAME_CAMPANAS is not None:
+                DATAFRAME_CAMPANAS = agregar_nueva_campana(DATAFRAME_CAMPANAS)
+            else:
+                print("\n[!] Primero debe cargar un archivo válido.")
+                
+        elif opcion == "5":
+            SISTEMA_ACTIVO = False
+            print("\nCerrando la sesión del sistema... ¡Hasta luego!")
+            
+        else:
+            print("\n[!] Opción no válida. Por favor, ingrese un número del 1 al 5.")
 
 
 # ------------------------------------------------------------------------------
 # 6. EJECUCIÓN DEL SISTEMA
 # ------------------------------------------------------------------------------
-# if __name__ == "__main__":
-#     mostrar_menu_principal()
+if __name__ == "__main__":
+    mostrar_menu_principal()
